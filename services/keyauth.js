@@ -73,7 +73,11 @@ class KeyAuthService {
             const parsed = JSON.parse(body);
             resolve(parsed);
           } catch (err) {
-            reject(new Error('INVALID_JSON_RESPONSE'));
+            if (typeof body === 'string' && body.includes('KeyAuth_Invalid')) {
+              reject(new Error('KEYAUTH_INVALID_CREDENTIALS'));
+            } else {
+              reject(new Error('INVALID_JSON_RESPONSE'));
+            }
           }
         });
       });
@@ -212,11 +216,21 @@ class KeyAuthService {
         message: res?.message || 'Invalid license key.'
       };
     } catch (err) {
-      const errCode = err.message === 'KEYAUTH_TIMEOUT' ? 'NETWORK_ERROR' : 'KEYAUTH_UNAVAILABLE';
+      let errCode = 'KEYAUTH_UNAVAILABLE';
+      let message = 'Unable to connect to KeyAuth authentication server.';
+
+      if (err.message === 'KEYAUTH_INVALID_CREDENTIALS') {
+        errCode = 'INVALID_CREDENTIALS';
+        message = 'Invalid KeyAuth credentials. Please verify your Owner ID and App Secret in Render Environment.';
+      } else if (err.message === 'KEYAUTH_TIMEOUT') {
+        errCode = 'NETWORK_ERROR';
+        message = 'KeyAuth server timed out.';
+      }
+
       return {
         success: false,
         error: errCode,
-        message: 'Unable to connect to KeyAuth authentication server.'
+        message: message
       };
     }
   }
