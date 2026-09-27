@@ -1,0 +1,23 @@
+services:
+  - type: web
+    name: madhesh-auth-backend
+    env: node
+    plan: free
+    buildCommand: npm install
+    startCommand: node server.js
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: ALLOWED_ORIGIN
+        value: "*"
+      - key: KEYAUTH_APP_NAME
+        value: "WP MIC"
+      - key: KEYAUTH_VERSION
+        value: "1.0"
+      - key: SESSION_DURATION_SECONDS
+        value: "86400"
+      # Set KEYAUTH_OWNER_ID and KEYAUTH_APP_SECRET in Render Dashboard
+      - key: KEYAUTH_OWNER_ID
+        sync: false
+      - key: KEYAUTH_APP_SECRET
+        sync: false
