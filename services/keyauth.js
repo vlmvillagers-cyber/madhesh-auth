@@ -3,6 +3,7 @@
  * 
  * Secure, server-side adapter for KeyAuth License Authentication.
  * Handles communication with KeyAuth API without exposing secrets to the client.
+ * Supports official KeyAuth Manager platform (keyauth-manager.online) and keyauth.win.
  * 
  * SECURITY:
  * - Never log license keys, tokens, or KeyAuth secrets.
@@ -15,6 +16,7 @@ const crypto = require('crypto');
 
 class KeyAuthService {
   constructor() {
+    this.activeApiUrl = null;
     this.reloadConfig();
   }
 
@@ -24,6 +26,7 @@ class KeyAuthService {
     this.appSecret = (process.env.KEYAUTH_APP_SECRET || '').replace(/^["']|["']$/g, '').trim();
     this.version = (process.env.KEYAUTH_VERSION || '1.0').replace(/^["']|["']$/g, '').trim();
     this.devTestLicense = (process.env.DEV_TEST_LICENSE || '').replace(/^["']|["']$/g, '').trim();
+    this.apiUrl = (process.env.KEYAUTH_API_URL || 'https://keyauth-manager.online/api/1.3/').trim();
   }
 
   /**
@@ -60,7 +63,7 @@ class KeyAuthService {
         headers: {
           'Content-Type': 'application/x-www-form-urlencoded',
           'Content-Length': Buffer.byteLength(params),
-          'User-Agent': 'Madhesh-Auth-Backend/1.0'
+          'User-Agent': 'KeyAuth'
         },
         timeout: timeoutMs
       };
@@ -97,7 +100,7 @@ class KeyAuthService {
   }
 
   /**
-   * Initialize a KeyAuth session (Official KeyAuth 1.3 flow)
+   * Initialize a KeyAuth session (supports keyauth-manager.online and keyauth.win)
    * @returns {Promise<string>} sessionId
    */
   async _initSession() {
@@ -108,15 +111,30 @@ class KeyAuthService {
       ver: this.version
     };
 
-    if (this.appSecret) {
-      postData.secret = this.appSecret;
+    const endpoints = [
+      this.apiUrl,
+      'https://keyauth-manager.online/api/1.3/',
+      'https://keyauth.win/api/1.3/'
+    ];
+    const uniqueEndpoints = [...new Set(endpoints)];
+
+    let lastError = null;
+    for (const endpoint of uniqueEndpoints) {
+      try {
+        const res = await this._request(endpoint, postData);
+        if (res && res.success && res.sessionid) {
+          this.activeApiUrl = endpoint;
+          return res.sessionid;
+        }
+        if (res && res.message) {
+          lastError = new Error(res.message);
+        }
+      } catch (err) {
+        lastError = err;
+      }
     }
 
-    const res = await this._request('https://keyauth.win/api/1.3/', postData);
-    if (!res || !res.success || !res.sessionid) {
-      throw new Error(res?.message || 'KEYAUTH_INIT_FAILED');
-    }
-    return res.sessionid;
+    throw lastError || new Error('KEYAUTH_INIT_FAILED');
   }
 
   /**
@@ -170,6 +188,7 @@ class KeyAuthService {
     try {
       // Step A: Initialize session with KeyAuth API
       const sessionId = await this._initSession();
+      const endpoint = this.activeApiUrl || this.apiUrl;
 
       // Step B: Authenticate the license key
       const hwid = crypto.createHash('sha256').update(this.ownerId + trimmedKey).digest('hex');
@@ -182,12 +201,14 @@ class KeyAuthService {
         hwid: hwid
       };
 
-      const res = await this._request('https://keyauth.win/api/1.3/', licensePayload);
+      const res = await this._request(endpoint, licensePayload);
 
       if (res && res.success) {
-        const expiry = res.info?.subscriptions?.[0]?.expiry
-          ? new Date(Number(res.info.subscriptions[0].expiry) * 1000).toISOString()
-          : new Date(Date.now() + 30 * 24 * 3600 * 1000).toISOString();
+        let expiry = new Date(Date.now() + 30 * 24 * 3600 * 1000).toISOString();
+        const rawExpiry = res.info?.subscriptions?.[0]?.expiry;
+        if (rawExpiry && Number(rawExpiry) > 0) {
+          expiry = new Date(Number(rawExpiry) * 1000).toISOString();
+        }
 
         return {
           success: true,
